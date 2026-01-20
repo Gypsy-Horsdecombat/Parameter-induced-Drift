@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """
-canonical_parameter_drift.py
+Parameter-Induced Drift — canonical reproducible demonstration
 
-Minimal reproducible demonstration of parameter-induced drift.
+This script generates an irreversible contraction process with time-varying
+coupling k(t), then fits mis-specified exponential models over increasing
+observation windows to show systematic drift of the fitted decay rate λ(T).
 
-An irreversible process with time-varying coupling κ(t) is generated.
-A mis-specified exponential model is fitted over increasing observation
-windows. The fitted decay rate λ̂(T) drifts systematically with window
-length, demonstrating structural bias in rate-based descriptions.
+It reproduces the structural bias described in Section IX of:
+"A Dissipative Channel Formalism Across Optics, Open Quantum Systems,
+ Thermodynamics, Information Theory and Ageing".
 
-Author: Gypsy Hors De Combat
-License: CC0-1.0
+Minimal dependencies: numpy, scipy, matplotlib
+
+Run:
+    python parameter_induced_drift.py
 """
 
 import numpy as np
@@ -18,109 +21,99 @@ import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 
 # -----------------------------
-# Ground-truth irreversible dynamics
+# Model specification
 # -----------------------------
 
-def kappa(t):
+def kappa(t, k0=0.2, alpha=0.6, omega=0.15):
     """
-    Time-dependent effective coupling κ(t).
-    Slowly increasing (structured bath / senescence / memory effects).
+    Time-varying effective coupling κ(t).
+    This breaks the semigroup / constant-rate assumption.
     """
-    return 0.15 + 0.08 * np.log(1.0 + t)
+    return k0 * (1.0 + alpha * np.sin(omega * t))
 
-def order_functional(t):
+
+def cumulative_rate(t, k0=0.2, alpha=0.6, omega=0.15):
     """
-    O(t) = exp(-∫₀ᵗ κ(t') dt')
-    Constructed numerically to avoid assuming exponential decay.
+    Integral ∫₀ᵗ κ(t') dt' computed analytically.
     """
-    dt = t[1] - t[0]
-    integral = np.cumsum(kappa(t)) * dt
-    return np.exp(-integral)
+    return k0 * (t - (alpha / omega) * (np.cos(omega * t) - 1.0))
 
-# Time grid
-t = np.linspace(0.0, 20.0, 4000)
-O_true = order_functional(t)
 
-# -----------------------------
-# Mis-specified exponential model
-# -----------------------------
+def order_functional(t, O0=1.0, **kwargs):
+    """
+    True irreversible contraction law:
+        O(t) = O0 * exp( - ∫₀ᵗ κ(t') dt' )
+    """
+    return O0 * np.exp(-cumulative_rate(t, **kwargs))
 
-def exp_model(t, lam):
-    return np.exp(-lam * t)
 
 # -----------------------------
-# Sliding-window fits
+# Mis-specified exponential fit
 # -----------------------------
 
-window_lengths = np.linspace(2.0, 20.0, 30)
-fitted_rates = []
+def exponential_model(t, O0, lam):
+    """Mis-specified constant-rate model O(t) = O0 * exp(-λ t)."""
+    return O0 * np.exp(-lam * t)
 
-for T in window_lengths:
-    mask = t <= T
-    t_fit = t[mask]
-    O_fit = O_true[mask]
 
-    # Fit exponential O ≈ exp(-λ t)
-    popt, _ = curve_fit(exp_model, t_fit, O_fit, p0=[0.2])
-    fitted_rates.append(popt[0])
+def fit_effective_rate(t, O):
+    """Fit a single exponential and return fitted λ."""
+    popt, _ = curve_fit(exponential_model, t, O, p0=(O[0], 0.1), maxfev=10000)
+    return popt[1]
 
-fitted_rates = np.array(fitted_rates)
 
 # -----------------------------
-# Plotting
+# Demonstration
 # -----------------------------
 
-plt.figure(figsize=(13, 4))
+def main():
+    # Time grid
+    t_max = 100.0
+    n_pts = 4000
+    t = np.linspace(0.0, t_max, n_pts)
 
-# Panel A — true dynamics and representative exponential fits
-plt.subplot(1, 2, 1)
-plt.plot(t, O_true, 'k', lw=2.5, label='True irreversible dynamics')
+    # Generate true contraction
+    O_true = order_functional(t)
 
-for T in [4, 8, 12, 16, 20]:
-    mask = t <= T
-    popt, _ = curve_fit(exp_model, t[mask], O_true[mask], p0=[0.2])
-    plt.plot(t, exp_model(t, popt[0]), '--', lw=1.5,
-             label=f'Exp fit, T={T:.0f}, λ̂={popt[0]:.3f}')
+    # Observation windows
+    windows = np.linspace(10.0, t_max, 30)
+    fitted_lambdas = []
 
-plt.xlabel('t')
-plt.ylabel('O(t)')
-plt.title('Mis-specified exponential fits')
-plt.legend(fontsize=8, frameon=False)
+    for T in windows:
+        mask = t <= T
+        lam_hat = fit_effective_rate(t[mask], O_true[mask])
+        fitted_lambdas.append(lam_hat)
 
-# Panel B — parameter-induced drift
-plt.subplot(1, 2, 2)
-plt.plot(window_lengths, fitted_rates, 'o-', lw=2.5)
-plt.xlabel('Observation window T')
-plt.ylabel('Fitted decay rate λ̂(T)')
-plt.title('Parameter-induced drift')
+    fitted_lambdas = np.array(fitted_lambdas)
 
-# Highlight drift envelope
-plt.axhline(fitted_rates.min(), ls=':', color='gray')
-plt.axhline(fitted_rates.max(), ls=':', color='gray')
+    # -------------------------
+    # Plot results
+    # -------------------------
 
-plt.tight_layout()
-plt.show()
+    fig, axs = plt.subplots(1, 2, figsize=(12, 4))
 
-# -----------------------------
-# Diagnostics (printable, quotable)
-# -----------------------------
+    # (A) True contraction
+    axs[0].plot(t, O_true, lw=2)
+    axs[0].set_title("True contraction with time-varying κ(t)")
+    axs[0].set_xlabel("t")
+    axs[0].set_ylabel("O(t)")
 
-print("\nParameter-induced drift diagnostics\n")
+    # (B) Drift of fitted decay rate
+    axs[1].plot(windows, fitted_lambdas, "o-", lw=2)
+    axs[1].set_title("Parameter-induced drift of fitted λ(T)")
+    axs[1].set_xlabel("Observation window T")
+    axs[1].set_ylabel("Fitted λ(T)")
 
-for T, lam in zip(window_lengths[::5], fitted_rates[::5]):
-    print(f"T = {T:6.2f}   λ̂(T) = {lam:.5f}")
+    plt.tight_layout()
+    plt.show()
 
-print("\nDrift envelope:")
-print(f"min λ̂ = {fitted_rates.min():.5f}")
-print(f"max λ̂ = {fitted_rates.max():.5f}")
-print(f"Δλ̂   = {fitted_rates.max() - fitted_rates.min():.5f}")
+    # Print diagnostic summary
+    print("Parameter-induced drift demonstration")
+    print("-----------------------------------")
+    print(f"Initial fitted λ ≈ {fitted_lambdas[0]:.4f}")
+    print(f"Final fitted λ   ≈ {fitted_lambdas[-1]:.4f}")
+    print("Drift magnitude  ≈", fitted_lambdas[-1] - fitted_lambdas[0])
 
-# Quantify monotonic trend
-coef = np.polyfit(window_lengths, fitted_rates, 1)
-print("\nLinear drift fit:")
-print(f"dλ̂/dT ≈ {coef[0]:.5e}  (systematic parameter drift)")
 
-print("\nInterpretation:")
-print("Constant-rate exponential models absorb structural mismatch")
-print("as drifting parameters. Rate is not primitive; it is a")
-print("coordinate-dependent summary of reduced dynamics.\n")
+if __name__ == "__main__":
+    main()
