@@ -7,7 +7,7 @@ This repository includes a minimal script demonstrating parameter-induced drift.
 
 Run:
 
-    reproducble_demonstrative_python canonical_parameter_drift.py
+    parameter_induced_drift.py
 
 The script generates an irreversible process with time-varying coupling κ(t),
 fits mis-specified exponential models over increasing observation windows,
